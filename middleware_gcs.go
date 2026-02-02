@@ -16,40 +16,26 @@ import (
 const mkdirPerm = 0o755
 
 func DownloadGCSObject(ctx context.Context, dir, filePath string, bucket *storage.BucketHandle) error {
-	var (
-		objectReader *storage.Reader
-		err          error
-	)
-
 	targetPath := filePath
-	object := bucket.Object(targetPath)
+	log.Println("debug:in:targetPath", targetPath)
 
-	objectReader, err = object.NewReader(ctx)
-	if err != nil {
-		if strings.HasSuffix(targetPath, "/") {
-			log.Println("fallback to index.html")
-
-			targetPath += "index.html"
-			indexObject := bucket.Object(targetPath)
-
-			objectReader, err = indexObject.NewReader(ctx)
-			if err != nil {
-				log.Println("fallback error")
-
-				return fmt.Errorf("indexObject.NewReader: %w", err)
-			}
-		} else {
-			return fmt.Errorf("object.NewReader: %w", err)
-		}
+	if strings.HasSuffix(targetPath, "/") {
+		log.Println("fallback to index.html")
+		targetPath += "index.html"
 	}
-	defer objectReader.Close()
 
+	objectReader, err := bucket.Object(targetPath).NewReader(ctx)
+	if err != nil {
+		return fmt.Errorf("object.newReader error: %w", err)
+	}
+	defer func() { _ = objectReader.Close() }()
+
+	log.Println("debug:targetPath", targetPath)
 	file := filepath.Join(dir, targetPath)
 
 	writeDir := filepath.Dir(file)
 	if _, err := os.Stat(writeDir); os.IsNotExist(err) {
-		err = os.MkdirAll(writeDir, mkdirPerm)
-		if err != nil {
+		if err := os.MkdirAll(writeDir, mkdirPerm); err != nil {
 			return fmt.Errorf("os.MkdirAll: %w", err)
 		}
 	}
@@ -58,9 +44,9 @@ func DownloadGCSObject(ctx context.Context, dir, filePath string, bucket *storag
 	if err != nil {
 		return fmt.Errorf("os.Create: %w", err)
 	}
+	defer func() { _ = f.Close() }()
 
-	_, err = io.Copy(f, objectReader)
-	if err != nil {
+	if _, err := io.Copy(f, objectReader); err != nil {
 		return fmt.Errorf("io.Copy; %w", err)
 	}
 
